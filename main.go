@@ -56,9 +56,10 @@ func NewRedashClientFromEnv() (*RedashClient, error) {
 	return &RedashClient{BaseURL: baseURL, APIKey: apiKey}, nil
 }
 
-func (c *RedashClient) get(endpoint string, out interface{}) error {
+// RedashClient: GET request with context
+func (c *RedashClient) get(ctx context.Context, endpoint string, out interface{}) error {
 	url := c.BaseURL + endpoint
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return err
 	}
@@ -75,9 +76,9 @@ func (c *RedashClient) get(endpoint string, out interface{}) error {
 }
 
 // Fetch all queries
-func (c *RedashClient) GetQueries() ([]RedashQuery, error) {
+func (c *RedashClient) GetQueries(ctx context.Context) ([]RedashQuery, error) {
 	var result RedashQueryListResponse
-	err := c.get("/api/queries", &result)
+	err := c.get(ctx, "/api/queries", &result)
 	if err != nil {
 		return nil, err
 	}
@@ -85,10 +86,10 @@ func (c *RedashClient) GetQueries() ([]RedashQuery, error) {
 }
 
 // Fetch a specific query by ID
-func (c *RedashClient) GetQueryByID(id int) (*RedashQueryDetail, error) {
+func (c *RedashClient) GetQueryByID(ctx context.Context, id int) (*RedashQueryDetail, error) {
 	var result RedashQueryDetail
 	endpoint := fmt.Sprintf("/api/queries/%d", id)
-	err := c.get(endpoint, &result)
+	err := c.get(ctx, endpoint, &result)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +109,7 @@ type CreateQueryResult struct {
 }
 
 // RedashClient: create a new query
-func (c *RedashClient) CreateQuery(args CreateQueryArgs) (*RedashQueryDetail, error) {
+func (c *RedashClient) CreateQuery(ctx context.Context, args CreateQueryArgs) (*RedashQueryDetail, error) {
 	endpoint := c.BaseURL + "/api/queries"
 	body, err := json.Marshal(map[string]interface{}{
 		"name":           args.Name,
@@ -118,7 +119,7 @@ func (c *RedashClient) CreateQuery(args CreateQueryArgs) (*RedashQueryDetail, er
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequest("POST", endpoint, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -150,10 +151,10 @@ type ExecuteQueryResult struct {
 }
 
 // RedashClient: execute a query and get result
-func (c *RedashClient) ExecuteQuery(id int) (interface{}, error) {
+func (c *RedashClient) ExecuteQuery(ctx context.Context, id int) (interface{}, error) {
 	endpoint := fmt.Sprintf("%s/api/queries/%d/results", c.BaseURL, id)
 	body := bytes.NewReader([]byte(`{}`))
-	req, err := http.NewRequest("POST", endpoint, body)
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, body)
 	if err != nil {
 		return nil, err
 	}
@@ -192,7 +193,7 @@ type UpdateQueryResult struct {
 }
 
 // RedashClient: update an existing query
-func (c *RedashClient) UpdateQuery(args UpdateQueryArgs) (*RedashQueryDetail, error) {
+func (c *RedashClient) UpdateQuery(ctx context.Context, args UpdateQueryArgs) (*RedashQueryDetail, error) {
 	endpoint := fmt.Sprintf("%s/api/queries/%d", c.BaseURL, args.ID)
 	body, err := json.Marshal(map[string]interface{}{
 		"name":           args.Name,
@@ -202,7 +203,7 @@ func (c *RedashClient) UpdateQuery(args UpdateQueryArgs) (*RedashQueryDetail, er
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequest("POST", endpoint, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -235,9 +236,9 @@ type ArchiveQueryResult struct {
 }
 
 // RedashClient: archive (soft-delete) a query
-func (c *RedashClient) ArchiveQuery(id int) error {
+func (c *RedashClient) ArchiveQuery(ctx context.Context, id int) error {
 	endpoint := fmt.Sprintf("%s/api/queries/%d", c.BaseURL, id)
-	req, err := http.NewRequest("DELETE", endpoint, nil)
+	req, err := http.NewRequestWithContext(ctx, "DELETE", endpoint, nil)
 	if err != nil {
 		return err
 	}
@@ -267,9 +268,9 @@ type ListDataSourcesResult struct {
 }
 
 // RedashClient: list all data sources
-func (c *RedashClient) ListDataSources() ([]RedashDataSource, error) {
+func (c *RedashClient) ListDataSources(ctx context.Context) ([]RedashDataSource, error) {
 	var result []RedashDataSource
-	err := c.get("/api/data_sources", &result)
+	err := c.get(ctx, "/api/data_sources", &result)
 	if err != nil {
 		return nil, err
 	}
@@ -298,7 +299,7 @@ func ListQueries(
 			},
 		}, nil
 	}
-	queries, err := client.GetQueries()
+	queries, err := client.GetQueries(ctx)
 	if err != nil {
 		return &mcp.CallToolResultFor[ListQueriesResult]{
 			Content: []mcp.Content{
@@ -342,7 +343,7 @@ func GetQuery(
 			},
 		}, nil
 	}
-	query, err := client.GetQueryByID(params.Arguments.ID)
+	query, err := client.GetQueryByID(ctx, params.Arguments.ID)
 	if err != nil {
 		return &mcp.CallToolResultFor[GetQueryResult]{
 			Content: []mcp.Content{
@@ -378,7 +379,7 @@ func CreateQuery(
 			},
 		}, nil
 	}
-	query, err := client.CreateQuery(params.Arguments)
+	query, err := client.CreateQuery(ctx, params.Arguments)
 	if err != nil {
 		return &mcp.CallToolResultFor[CreateQueryResult]{
 			Content: []mcp.Content{
@@ -414,7 +415,7 @@ func ExecuteQuery(
 			},
 		}, nil
 	}
-	qr, err := client.ExecuteQuery(params.Arguments.ID)
+	qr, err := client.ExecuteQuery(ctx, params.Arguments.ID)
 	if err != nil {
 		return &mcp.CallToolResultFor[ExecuteQueryResult]{
 			Content: []mcp.Content{
@@ -450,7 +451,7 @@ func UpdateQuery(
 			},
 		}, nil
 	}
-	query, err := client.UpdateQuery(params.Arguments)
+	query, err := client.UpdateQuery(ctx, params.Arguments)
 	if err != nil {
 		return &mcp.CallToolResultFor[UpdateQueryResult]{
 			Content: []mcp.Content{
@@ -486,7 +487,7 @@ func ArchiveQuery(
 			},
 		}, nil
 	}
-	err = client.ArchiveQuery(params.Arguments.ID)
+	err = client.ArchiveQuery(ctx, params.Arguments.ID)
 	if err != nil {
 		return &mcp.CallToolResultFor[ArchiveQueryResult]{
 			Content: []mcp.Content{
@@ -522,7 +523,7 @@ func ListDataSources(
 			},
 		}, nil
 	}
-	ds, err := client.ListDataSources()
+	ds, err := client.ListDataSources(ctx)
 	if err != nil {
 		return &mcp.CallToolResultFor[ListDataSourcesResult]{
 			Content: []mcp.Content{
