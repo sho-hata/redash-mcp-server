@@ -14,6 +14,7 @@ redash-mcp-server is a server that makes the redash API available via the Model 
         "--rm",
         "-e",
         "REDASH_BASE_URL",
+        "-e",
         "REDASH_API_KEY",
         "redash-mcp-server"
       ],
