@@ -31,38 +31,67 @@ type RedashQueryListResponse struct {
 	// Add pagination fields if needed
 }
 
-// Function to fetch Redash queries
-func fetchRedashQueries() ([]RedashQuery, error) {
+// Struct for Redash query detail (simplified, add more fields as needed)
+type RedashQueryDetail struct {
+	ID    int    `json:"id"`
+	Name  string `json:"name"`
+	Query string `json:"query"`
+	// Add more fields as needed
+}
+
+// Redash API client struct
+
+type RedashClient struct {
+	BaseURL string
+	APIKey  string
+}
+
+func NewRedashClientFromEnv() (*RedashClient, error) {
 	baseURL := os.Getenv("REDASH_BASE_URL")
 	apiKey := os.Getenv("REDASH_API_KEY")
 	if baseURL == "" || apiKey == "" {
 		return nil, fmt.Errorf("REDASH_BASE_URL or REDASH_API_KEY is not set")
 	}
+	return &RedashClient{BaseURL: baseURL, APIKey: apiKey}, nil
+}
 
-	endpoint := baseURL + "/api/queries"
-	client := &http.Client{}
-	req, err := http.NewRequest("GET", endpoint, nil)
+func (c *RedashClient) get(endpoint string, out interface{}) error {
+	url := c.BaseURL + endpoint
+	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return nil, err
+		return err
 	}
-
-	req.Header.Set("Authorization", "Key "+apiKey)
-
-	resp, err := client.Do(req)
+	req.Header.Set("Authorization", "Key "+c.APIKey)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Redash API request failed: %s", resp.Status)
+		return fmt.Errorf("Redash API request failed: %s", resp.Status)
 	}
+	return json.NewDecoder(resp.Body).Decode(out)
+}
 
+// Fetch all queries
+func (c *RedashClient) GetQueries() ([]RedashQuery, error) {
 	var result RedashQueryListResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	err := c.get("/api/queries", &result)
+	if err != nil {
 		return nil, err
 	}
 	return result.Results, nil
+}
+
+// Fetch a specific query by ID
+func (c *RedashClient) GetQueryByID(id int) (*RedashQueryDetail, error) {
+	var result RedashQueryDetail
+	endpoint := fmt.Sprintf("/api/queries/%d", id)
+	err := c.get(endpoint, &result)
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
 }
 
 // MCP tool to fetch Redash query list
@@ -78,7 +107,16 @@ func ListQueries(
 	ss *mcp.ServerSession,
 	params *mcp.CallToolParamsFor[ListQueriesArgs],
 ) (*mcp.CallToolResultFor[ListQueriesResult], error) {
-	queries, err := fetchRedashQueries()
+	client, err := NewRedashClientFromEnv()
+	if err != nil {
+		return &mcp.CallToolResultFor[ListQueriesResult]{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: fmt.Sprintf("Failed to create Redash client: %v", err)},
+				&mcp.TextContent{Text: `{"queries":[]}`},
+			},
+		}, nil
+	}
+	queries, err := client.GetQueries()
 	if err != nil {
 		return &mcp.CallToolResultFor[ListQueriesResult]{
 			Content: []mcp.Content{
@@ -99,11 +137,56 @@ func ListQueries(
 	}, nil
 }
 
+// MCP tool: get_query
+
+type GetQueryArgs struct {
+	ID int `json:"id"`
+}
+type GetQueryResult struct {
+	Query *RedashQueryDetail `json:"query"`
+}
+
+func GetQuery(
+	ctx context.Context,
+	ss *mcp.ServerSession,
+	params *mcp.CallToolParamsFor[GetQueryArgs],
+) (*mcp.CallToolResultFor[GetQueryResult], error) {
+	client, err := NewRedashClientFromEnv()
+	if err != nil {
+		return &mcp.CallToolResultFor[GetQueryResult]{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: fmt.Sprintf("Failed to create Redash client: %v", err)},
+				&mcp.TextContent{Text: `{"query":null}`},
+			},
+		}, nil
+	}
+	query, err := client.GetQueryByID(params.Arguments.ID)
+	if err != nil {
+		return &mcp.CallToolResultFor[GetQueryResult]{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: fmt.Sprintf("Failed to fetch query: %v", err)},
+				&mcp.TextContent{Text: `{"query":null}`},
+			},
+		}, nil
+	}
+	jsonBytes, err := json.Marshal(GetQueryResult{Query: query})
+	if err != nil {
+		return nil, err
+	}
+	return &mcp.CallToolResultFor[GetQueryResult]{
+		Content: []mcp.Content{
+			&mcp.TextContent{Text: "Fetched query details."},
+			&mcp.TextContent{Text: string(jsonBytes)},
+		},
+	}, nil
+}
+
 func main() {
 	flag.Parse()
 
 	server := mcp.NewServer(&mcp.Implementation{Name: "greeter"}, nil)
 	mcp.AddTool(server, &mcp.Tool{Name: "list_queries", Description: "Get a list of Redash queries"}, ListQueries)
+	mcp.AddTool(server, &mcp.Tool{Name: "get_query", Description: "Get details of a specific Redash query"}, GetQuery)
 
 	if *httpAddr != "" {
 		handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
