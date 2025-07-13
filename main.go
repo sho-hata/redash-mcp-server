@@ -223,6 +223,29 @@ func (c *RedashClient) UpdateQuery(args UpdateQueryArgs) (*RedashQueryDetail, er
 	return &result, nil
 }
 
+// Structs for list_data_sources
+
+type RedashDataSource struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+	Type string `json:"type"`
+	// Add more fields as needed
+}
+
+type ListDataSourcesResult struct {
+	DataSources []RedashDataSource `json:"data_sources"`
+}
+
+// RedashClient: list all data sources
+func (c *RedashClient) ListDataSources() ([]RedashDataSource, error) {
+	var result []RedashDataSource
+	err := c.get("/api/data_sources", &result)
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 // MCP tool to fetch Redash query list
 
 type ListQueriesArgs struct{}
@@ -418,6 +441,42 @@ func UpdateQuery(
 	}, nil
 }
 
+// MCP tool: list_data_sources
+func ListDataSources(
+	ctx context.Context,
+	ss *mcp.ServerSession,
+	params *mcp.CallToolParamsFor[struct{}],
+) (*mcp.CallToolResultFor[ListDataSourcesResult], error) {
+	client, err := NewRedashClientFromEnv()
+	if err != nil {
+		return &mcp.CallToolResultFor[ListDataSourcesResult]{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: fmt.Sprintf("Failed to create Redash client: %v", err)},
+				&mcp.TextContent{Text: `{"data_sources":[]}`},
+			},
+		}, nil
+	}
+	ds, err := client.ListDataSources()
+	if err != nil {
+		return &mcp.CallToolResultFor[ListDataSourcesResult]{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: fmt.Sprintf("Failed to fetch data sources: %v", err)},
+				&mcp.TextContent{Text: `{"data_sources":[]}`},
+			},
+		}, nil
+	}
+	jsonBytes, err := json.Marshal(ListDataSourcesResult{DataSources: ds})
+	if err != nil {
+		return nil, err
+	}
+	return &mcp.CallToolResultFor[ListDataSourcesResult]{
+		Content: []mcp.Content{
+			&mcp.TextContent{Text: fmt.Sprintf("Fetched %d data sources.", len(ds))},
+			&mcp.TextContent{Text: string(jsonBytes)},
+		},
+	}, nil
+}
+
 func main() {
 	flag.Parse()
 
@@ -427,6 +486,7 @@ func main() {
 	mcp.AddTool(server, &mcp.Tool{Name: "create_query", Description: "Create a new Redash query"}, CreateQuery)
 	mcp.AddTool(server, &mcp.Tool{Name: "execute_query", Description: "Execute a Redash query and return the result"}, ExecuteQuery)
 	mcp.AddTool(server, &mcp.Tool{Name: "update_query", Description: "Update an existing Redash query"}, UpdateQuery)
+	mcp.AddTool(server, &mcp.Tool{Name: "list_data_sources", Description: "List all available Redash data sources"}, ListDataSources)
 
 	if *httpAddr != "" {
 		handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
