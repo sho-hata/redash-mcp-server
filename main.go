@@ -223,6 +223,36 @@ func (c *RedashClient) UpdateQuery(args UpdateQueryArgs) (*RedashQueryDetail, er
 	return &result, nil
 }
 
+// Args and result for archive_query
+
+type ArchiveQueryArgs struct {
+	ID int `json:"id"`
+}
+
+type ArchiveQueryResult struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+}
+
+// RedashClient: archive (soft-delete) a query
+func (c *RedashClient) ArchiveQuery(id int) error {
+	endpoint := fmt.Sprintf("%s/api/queries/%d", c.BaseURL, id)
+	req, err := http.NewRequest("DELETE", endpoint, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Key "+c.APIKey)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("Redash API request failed: %s", resp.Status)
+	}
+	return nil
+}
+
 // Structs for list_data_sources
 
 type RedashDataSource struct {
@@ -441,6 +471,42 @@ func UpdateQuery(
 	}, nil
 }
 
+// MCP tool: archive_query
+func ArchiveQuery(
+	ctx context.Context,
+	ss *mcp.ServerSession,
+	params *mcp.CallToolParamsFor[ArchiveQueryArgs],
+) (*mcp.CallToolResultFor[ArchiveQueryResult], error) {
+	client, err := NewRedashClientFromEnv()
+	if err != nil {
+		return &mcp.CallToolResultFor[ArchiveQueryResult]{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: fmt.Sprintf("Failed to create Redash client: %v", err)},
+				&mcp.TextContent{Text: `{"success":false,"message":"client error"}`},
+			},
+		}, nil
+	}
+	err = client.ArchiveQuery(params.Arguments.ID)
+	if err != nil {
+		return &mcp.CallToolResultFor[ArchiveQueryResult]{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: fmt.Sprintf("Failed to archive query: %v", err)},
+				&mcp.TextContent{Text: fmt.Sprintf(`{"success":false,"message":"%v"}`, err)},
+			},
+		}, nil
+	}
+	jsonBytes, err := json.Marshal(ArchiveQueryResult{Success: true, Message: "Query archived."})
+	if err != nil {
+		return nil, err
+	}
+	return &mcp.CallToolResultFor[ArchiveQueryResult]{
+		Content: []mcp.Content{
+			&mcp.TextContent{Text: "Query archived."},
+			&mcp.TextContent{Text: string(jsonBytes)},
+		},
+	}, nil
+}
+
 // MCP tool: list_data_sources
 func ListDataSources(
 	ctx context.Context,
@@ -487,6 +553,7 @@ func main() {
 	mcp.AddTool(server, &mcp.Tool{Name: "execute_query", Description: "Execute a Redash query and return the result"}, ExecuteQuery)
 	mcp.AddTool(server, &mcp.Tool{Name: "update_query", Description: "Update an existing Redash query"}, UpdateQuery)
 	mcp.AddTool(server, &mcp.Tool{Name: "list_data_sources", Description: "List all available Redash data sources"}, ListDataSources)
+	mcp.AddTool(server, &mcp.Tool{Name: "archive_query", Description: "Archive (soft-delete) a Redash query"}, ArchiveQuery)
 
 	if *httpAddr != "" {
 		handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
